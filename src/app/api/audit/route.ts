@@ -1,8 +1,6 @@
 import { mkdir } from "fs/promises";
 import { NextRequest, NextResponse } from "next/server";
 import path from "path";
-import axe from "axe-core";
-import { chromium, type Browser, type ConsoleMessage, type ViewportSize } from "playwright";
 
 import { calculateAuditScore } from "@/lib/calculateAuditScore";
 import type {
@@ -40,6 +38,17 @@ type ViewportAuditOutcome = {
 type AuditErrorResponse = {
   error: string;
   debug?: AuditErrorDebug;
+};
+
+type BrowserLike = any;
+
+type ConsoleMessageLike = {
+  type: () => string;
+  text: () => string;
+  location: () => {
+    url?: string;
+    lineNumber?: number;
+  };
 };
 
 function getInvalidUrlMessage() {
@@ -117,6 +126,10 @@ function createScreenshotFilename(
 }
 
 function shouldUseInlineScreenshots() {
+  return process.env.NETLIFY === "true";
+}
+
+function isHostedDemoEnvironment() {
   return process.env.NETLIFY === "true";
 }
 
@@ -235,7 +248,7 @@ function createErrorResponse(
 
 function addConsoleIssue(
   issueMap: Map<string, ConsoleIssue>,
-  message: ConsoleMessage,
+  message: ConsoleMessageLike,
 ) {
   if (message.type() !== "error") {
     return;
@@ -260,11 +273,12 @@ function addConsoleIssue(
 async function collectPageAuditData(
   targetUrl: string,
   viewport: "desktop" | "mobile",
-  size: ViewportSize,
-  browser: Browser,
+  size: { width: number; height: number },
+  browser: BrowserLike,
   consoleIssueMap: Map<string, ConsoleIssue>,
   screenshotFilePath?: string,
   screenshotUrl?: string,
+  axeSource?: string,
 ): Promise<ViewportAuditOutcome> {
   const context = await browser.newContext({
     viewport: size,
@@ -279,7 +293,9 @@ async function collectPageAuditData(
   try {
     const page = await context.newPage();
 
-    page.on("console", (message) => addConsoleIssue(consoleIssueMap, message));
+    page.on("console", (message: ConsoleMessageLike) =>
+      addConsoleIssue(consoleIssueMap, message),
+    );
 
     const response = await page.goto(targetUrl, {
       waitUntil: "domcontentloaded",
@@ -335,7 +351,9 @@ async function collectPageAuditData(
       .first()
       .getAttribute("content");
 
-    const missingAltImages = await page.locator("img").evaluateAll((images) => {
+    const missingAltImages = await page
+      .locator("img")
+      .evaluateAll((images: Element[]) => {
       return (images as HTMLImageElement[])
         .filter((image) => !image.hasAttribute("alt"))
         .map((image) => ({
@@ -343,9 +361,11 @@ async function collectPageAuditData(
           reason: "missing-alt" as const,
           alt: image.getAttribute("alt"),
         }));
-    });
+      });
 
-    const brokenImages = await page.locator("img").evaluateAll((images) => {
+    const brokenImages = await page
+      .locator("img")
+      .evaluateAll((images: Element[]) => {
       return (images as HTMLImageElement[])
         .filter((image) => image.complete && image.naturalWidth === 0)
         .map((image) => ({
@@ -353,13 +373,16 @@ async function collectPageAuditData(
           reason: "broken" as const,
           alt: image.getAttribute("alt"),
         }));
-    });
+      });
 
-    await page.addScriptTag({
-      content: axe.source,
-    });
+    let accessibilityIssues: AccessibilityIssue[] = [];
 
-    const accessibilityIssues = await page.evaluate(async () => {
+    if (axeSource) {
+      await page.addScriptTag({
+        content: axeSource,
+      });
+
+      accessibilityIssues = await page.evaluate(async () => {
       type AxeRunResult = {
         violations: Array<{
           id: string;
@@ -390,7 +413,8 @@ async function collectPageAuditData(
         selectors: violation.nodes.flatMap((node) => node.target),
         nodes: violation.nodes.length,
       }));
-    });
+      });
+    }
 
     const screenshotBuffer = await page.screenshot({
       path: screenshotFilePath,
@@ -432,7 +456,7 @@ async function collectPageAuditData(
 }
 
 export async function POST(request: NextRequest) {
-  let browser: Browser | null = null;
+  let browser: BrowserLike | null = null;
 
   try {
     const body: unknown = await request.json();
@@ -449,6 +473,18 @@ export async function POST(request: NextRequest) {
     }
 
     const url = body.url.trim();
+
+    if (isHostedDemoEnvironment()) {
+      return createErrorResponse(
+        "This hosted demo is available online, but live website auditing is disabled in the serverless environment. Use local development for real audits.",
+        501,
+        {
+          code: "HOSTED_DEMO_AUDIT_DISABLED",
+          targetUrl: url,
+          hint: "The Netlify deployment is running in demo mode because Playwright-based browser auditing is not enabled there.",
+        },
+      );
+    }
 
     if (isSelfAuditTarget(url, request.url)) {
       return createErrorResponse(
@@ -481,9 +517,16 @@ export async function POST(request: NextRequest) {
       await mkdir(SCREENSHOT_DIRECTORY, { recursive: true });
     }
 
+    const [{ chromium }, axeModule] = await Promise.all([
+      import("playwright"),
+      import("axe-core"),
+    ]);
+
     browser = await chromium.launch({
       headless: true,
     });
+
+    const axeSource = axeModule.default.source;
 
     const desktopAudit = await collectPageAuditData(
       url,
@@ -493,6 +536,7 @@ export async function POST(request: NextRequest) {
       consoleIssueMap,
       desktopScreenshotPath,
       desktopScreenshotUrl,
+      axeSource,
     );
 
     const mobileAudit = await collectPageAuditData(
@@ -503,6 +547,7 @@ export async function POST(request: NextRequest) {
       consoleIssueMap,
       mobileScreenshotPath,
       mobileScreenshotUrl,
+      axeSource,
     );
 
     if (!desktopAudit.status.loaded && !mobileAudit.status.loaded) {
