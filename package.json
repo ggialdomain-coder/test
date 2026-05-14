@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "audit:server": "node audit-backend/server.mjs"
   },
   "dependencies": {
     "axe-core": "^4.11.4",

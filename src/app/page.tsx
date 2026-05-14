@@ -5,6 +5,7 @@ import { FormEvent, useState } from "react";
 import { AuditResult } from "@/components/AuditResult";
 import { ReportHistory } from "@/components/ReportHistory";
 import { UrlAuditForm } from "@/components/UrlAuditForm";
+import { getAuditApiUrl } from "@/lib/getAuditApiUrl";
 import type {
   AuditErrorDebug,
   AuditResult as AuditResultType,
@@ -32,6 +33,7 @@ function isValidWebsiteUrl(value: string) {
 
 export default function Home() {
   const isDevelopment = process.env.NODE_ENV !== "production";
+  const auditApiUrl = getAuditApiUrl();
   const [url, setUrl] = useState("https://example.com");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -90,7 +92,7 @@ export default function Home() {
     setResult(null);
 
     try {
-      const response = await fetch("/api/audit", {
+      const response = await fetch(auditApiUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -142,7 +144,7 @@ export default function Home() {
       );
       setErrorDebug({
         code: "FRONTEND_NETWORK_FAILURE",
-        hint: "The browser could not complete the request to /api/audit.",
+        hint: `The browser could not complete the request to ${auditApiUrl}.`,
         targetUrl: trimmedUrl,
       });
     } finally {
@@ -301,6 +303,11 @@ export default function Home() {
                     The UI is connected to the audit API and ready to evolve
                     into the fuller Playwright plus `axe-core` pipeline.
                   </p>
+                  {isDevelopment ? (
+                    <p className="break-all text-xs text-slate-500">
+                      Current audit endpoint: {auditApiUrl}
+                    </p>
+                  ) : null}
                 </div>
               )}
             </div>

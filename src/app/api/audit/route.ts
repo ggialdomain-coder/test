@@ -40,7 +40,52 @@ type AuditErrorResponse = {
   debug?: AuditErrorDebug;
 };
 
-type BrowserLike = any;
+type BrowserLike = {
+  newContext: (options: {
+    viewport: { width: number; height: number };
+    userAgent?: string;
+    isMobile: boolean;
+    deviceScaleFactor: number;
+  }) => Promise<BrowserContextLike>;
+  close: () => Promise<void>;
+};
+
+type BrowserContextLike = {
+  newPage: () => Promise<PageLike>;
+  close: () => Promise<void>;
+};
+
+type PageLike = {
+  on: (
+    event: "console",
+    callback: (message: ConsoleMessageLike) => void,
+  ) => void;
+  goto: (
+    url: string,
+    options: { waitUntil: "domcontentloaded"; timeout: number },
+  ) => Promise<{
+    ok: () => boolean;
+    status: () => number;
+  } | null>;
+  waitForLoadState: (
+    state: "load" | "networkidle",
+    options: { timeout: number },
+  ) => Promise<void>;
+  title: () => Promise<string>;
+  locator: (selector: string) => {
+    first: () => {
+      getAttribute: (name: string) => Promise<string | null>;
+    };
+    evaluateAll: <T>(pageFunction: (elements: Element[]) => T) => Promise<T>;
+  };
+  addScriptTag: (options: { content: string }) => Promise<unknown>;
+  evaluate: <T>(pageFunction: () => Promise<T>) => Promise<T>;
+  screenshot: (options: {
+    path?: string;
+    fullPage: boolean;
+    type: "png";
+  }) => Promise<Buffer>;
+};
 
 type ConsoleMessageLike = {
   type: () => string;
