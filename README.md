@@ -1,36 +1,151 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Frontend QA Tool
 
-## Getting Started
+Frontend QA Tool is a frontend QA automation SaaS MVP that audits a public website URL and generates a visual report for common frontend quality issues.
 
-First, run the development server:
+## What It Does
+
+The app lets a user enter a website URL, run an audit, and review a browser-based report with:
+
+- page metadata checks
+- image quality checks
+- console error capture
+- desktop and mobile viewport checks
+- accessibility violations powered by `axe-core`
+- screenshots for desktop and mobile
+- local audit history
+- PDF export of the visible report
+
+## Features
+
+- Audit public URLs through a simple dashboard
+- Check page title and meta description
+- Detect missing image alt attributes
+- Detect broken images
+- Capture console errors during load
+- Test desktop and mobile viewport loading
+- Run accessibility checks with `axe-core`
+- Generate an overall score and status band
+- Save desktop and mobile screenshots
+- Export the report as a PDF
+- Store the latest 10 audits in browser `localStorage`
+
+## Tech Stack
+
+- Next.js App Router
+- TypeScript
+- Tailwind CSS
+- Playwright
+- axe-core
+- jsPDF
+- html2canvas
+
+## Installation
+
+1. Clone the repository.
+2. Move into the project folder.
+3. Install dependencies:
+
+```bash
+npm install
+```
+
+## Run Locally
+
+Start the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Playwright Browser Install
 
-## Learn More
+Playwright needs a browser installed for local audits.
 
-To learn more about Next.js, take a look at the following resources:
+Run:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npx playwright install chromium
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deploy to Netlify
 
-## Deploy on Vercel
+This repo is prepared for Netlify with:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `netlify.toml`
+- production build verified with `npm run build`
+- Next.js App Router compatible setup
+- Netlify-safe screenshot handling for deployed audits
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Basic deploy flow:
+
+1. Push this repo to GitHub, GitLab, or Bitbucket.
+2. Create a new site in Netlify.
+3. Import the repository.
+4. Netlify should detect Next.js automatically.
+5. Use the default build command:
+
+```bash
+npm run build
+```
+
+6. Deploy the site.
+
+## Project Structure
+
+Key folders:
+
+- `src/app` - app routes and API routes
+- `src/components` - UI components
+- `src/lib` - shared logic such as score calculation
+- `src/types` - shared TypeScript types
+- `public/audit-screenshots` - generated audit screenshots during local development
+
+## How the MVP Works
+
+1. Enter a public website URL.
+2. Submit the audit form.
+3. The backend launches Playwright Chromium.
+4. The app audits the page in desktop and mobile viewports.
+5. The report is rendered in the dashboard, saved locally in history, and can be exported as a PDF.
+
+## Known Limitations
+
+- Designed for public URLs only
+- No authentication or team accounts yet
+- No database persistence yet; audit history is stored only in browser `localStorage`
+- Screenshot files are stored locally in `public/audit-screenshots`
+- Accessibility checks currently use the primary audited page response
+- PDF export captures the visible report area from the browser, so output can vary slightly by screen and browser rendering
+- Long or highly dynamic pages may take longer to audit or export
+- No background job queue yet; audits run within the request lifecycle
+
+## Future Roadmap
+
+- user authentication
+- persistent report storage in a database
+- background audit jobs and queue processing
+- shareable report links
+- team dashboards
+- recurring scheduled audits
+- more SEO checks
+- richer accessibility summaries and grouping
+- performance and Core Web Vitals checks
+- downloadable branded PDF reports
+- CSV and JSON export
+- domain/project management
+
+## Development Notes
+
+If you install dependencies on a fresh machine, the usual local setup flow is:
+
+```bash
+npm install
+npx playwright install chromium
+npm run dev
+```
