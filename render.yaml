@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: frontend-qa-audit-backend
+    runtime: docker
+    dockerfilePath: ./audit-backend/Dockerfile
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_ORIGIN
+        sync: false

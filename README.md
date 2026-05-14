@@ -114,21 +114,22 @@ This backend is intended for:
 
 ### Deploy Audit Backend to Render
 
-Use a new Render Web Service with these settings:
+Recommended: deploy the audit backend on Render using Docker so Playwright and Chromium dependencies are bundled correctly.
+
+This repo includes:
+
+- `audit-backend/Dockerfile`
+- `render.yaml`
+
+Use a new Render Web Service or Blueprint with these settings:
 
 - Repository: this repo
 - Root Directory: leave blank
-- Environment: Node
-- Build Command:
+- Runtime: Docker
+- Dockerfile path:
 
 ```bash
-npm install && npx playwright install chromium
-```
-
-- Start Command:
-
-```bash
-npm run audit:server
+audit-backend/Dockerfile
 ```
 
 Recommended environment variables:
