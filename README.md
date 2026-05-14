@@ -112,6 +112,42 @@ This backend is intended for:
 - local development with the Netlify frontend
 - deployment to a separate Node-friendly host such as Render, Railway, Fly.io, or a VPS
 
+### Deploy Audit Backend to Render
+
+Use a new Render Web Service with these settings:
+
+- Repository: this repo
+- Root Directory: leave blank
+- Environment: Node
+- Build Command:
+
+```bash
+npm install && npx playwright install chromium
+```
+
+- Start Command:
+
+```bash
+npm run audit:server
+```
+
+Recommended environment variables:
+
+- `NODE_ENV=production`
+- `ALLOWED_ORIGIN=https://your-netlify-site.netlify.app`
+
+After Render gives you a backend URL such as:
+
+```text
+https://your-audit-backend.onrender.com
+```
+
+set this in your Netlify frontend environment variables:
+
+```bash
+NEXT_PUBLIC_AUDIT_API_BASE_URL=https://your-audit-backend.onrender.com
+```
+
 ## Deploy to Netlify
 
 This repo is prepared for Netlify with:
