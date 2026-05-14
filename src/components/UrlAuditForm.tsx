@@ -11,8 +11,9 @@ const auditTags = [
   "Title",
   "Meta description",
   "Images",
-  "Console",
-  "Accessibility",
+  "Broken assets",
+  "Reachability",
+  "PDF export",
 ];
 
 export function UrlAuditForm({
@@ -70,10 +71,10 @@ export function UrlAuditForm({
         ))}
       </div>
       <div className="rounded-2xl border border-sky-100 bg-sky-50/80 px-4 py-3 text-sm leading-6 text-sky-900">
-        <span className="font-semibold">Local dev tip:</span> Do not audit this
-        dashboard&apos;s own URL. Test another local app on a different port,
-        such as <span className="font-semibold">http://localhost:5173</span>,
-        or use a public website.
+        <span className="font-semibold">Hosted-safe mode:</span> This MVP runs
+        reliable HTML and asset checks that work well on standard hosting.
+        Browser-rendered checks like console capture and automated
+        accessibility scanning are planned for a later backend upgrade.
       </div>
     </form>
   );

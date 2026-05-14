@@ -1,17 +1,14 @@
 # Frontend QA Tool
 
-Frontend QA Tool is a frontend QA automation SaaS MVP that audits a public website URL and generates a visual report for common frontend quality issues.
+Frontend QA Tool is a hosted-safe frontend QA automation SaaS MVP that audits a public website URL and generates a visual report for common frontend quality issues.
 
 ## What It Does
 
-The app lets a user enter a website URL, run an audit, and review a browser-based report with:
+The app lets a user enter a website URL, run an audit, and review a hosted-safe report with:
 
 - page metadata checks
 - image quality checks
-- console error capture
-- desktop and mobile viewport checks
-- accessibility violations powered by `axe-core`
-- screenshots for desktop and mobile
+- desktop and mobile reachability checks
 - local audit history
 - PDF export of the visible report
 
@@ -21,11 +18,8 @@ The app lets a user enter a website URL, run an audit, and review a browser-base
 - Check page title and meta description
 - Detect missing image alt attributes
 - Detect broken images
-- Capture console errors during load
-- Test desktop and mobile viewport loading
-- Run accessibility checks with `axe-core`
+- Test desktop and mobile website reachability
 - Generate an overall score and status band
-- Save desktop and mobile screenshots
 - Export the report as a PDF
 - Store the latest 10 audits in browser `localStorage`
 
@@ -34,8 +28,6 @@ The app lets a user enter a website URL, run an audit, and review a browser-base
 - Next.js App Router
 - TypeScript
 - Tailwind CSS
-- Playwright
-- axe-core
 - jsPDF
 - html2canvas
 
@@ -63,92 +55,6 @@ Open:
 http://localhost:3000
 ```
 
-### Run with Separate Audit Backend
-
-The frontend now supports calling an external audit service. This is the recommended setup for hosted deployments where Playwright cannot run reliably inside the frontend platform.
-
-1. Copy `.env.example` to `.env.local`
-2. Set:
-
-```bash
-NEXT_PUBLIC_AUDIT_API_BASE_URL=http://localhost:8787
-```
-
-3. Start the standalone audit backend:
-
-```bash
-npm run audit:server
-```
-
-4. In a second terminal, start the frontend:
-
-```bash
-npm run dev
-```
-
-## Playwright Browser Install
-
-Playwright needs a browser installed for local audits.
-
-Run:
-
-```bash
-npx playwright install chromium
-```
-
-## Standalone Audit Backend
-
-This repo includes a standalone backend server at:
-
-- `audit-backend/server.mjs`
-
-It exposes:
-
-- `POST /api/audit`
-- `GET /health`
-
-This backend is intended for:
-
-- local development with the Netlify frontend
-- deployment to a separate Node-friendly host such as Render, Railway, Fly.io, or a VPS
-
-### Deploy Audit Backend to Render
-
-Recommended: deploy the audit backend on Render using Docker so Playwright and Chromium dependencies are bundled correctly.
-
-This repo includes:
-
-- `audit-backend/Dockerfile`
-- `render.yaml`
-
-Use a new Render Web Service or Blueprint with these settings:
-
-- Repository: this repo
-- Root Directory: leave blank
-- Runtime: Docker
-- Dockerfile path:
-
-```bash
-audit-backend/Dockerfile
-```
-
-Recommended environment variables:
-
-- `NODE_ENV=production`
-- `ALLOWED_ORIGIN=https://your-netlify-site.netlify.app`
-
-After Render gives you a backend URL such as:
-
-```text
-https://your-audit-backend.onrender.com
-```
-
-set this in your Netlify frontend environment variables:
-
-```bash
-NEXT_PUBLIC_AUDIT_API_BASE_URL=https://your-audit-backend.onrender.com
-```
-
 ## Deploy to Netlify
 
 This repo is prepared for Netlify with:
@@ -156,13 +62,13 @@ This repo is prepared for Netlify with:
 - `netlify.toml`
 - production build verified with `npm run build`
 - Next.js App Router compatible setup
-- Netlify-safe screenshot handling for deployed audits
+- a hosted-safe audit route that avoids browser automation on the server
 
 Important:
 
-- Netlify is suitable for the frontend
-- real browser auditing should be moved to the standalone backend for a working hosted setup
-- the frontend can use `NEXT_PUBLIC_AUDIT_API_BASE_URL` to call that separate backend
+- the current MVP is designed to run directly on standard hosting
+- it uses server-side HTML fetching and asset validation instead of browser automation
+- browser-powered checks can be added later behind a separate worker or premium backend
 
 Basic deploy flow:
 
@@ -186,14 +92,14 @@ Key folders:
 - `src/components` - UI components
 - `src/lib` - shared logic such as score calculation
 - `src/types` - shared TypeScript types
-- `public/audit-screenshots` - generated audit screenshots during local development
+- `public` - static assets
 
 ## How the MVP Works
 
 1. Enter a public website URL.
 2. Submit the audit form.
-3. The backend launches Playwright Chromium.
-4. The app audits the page in desktop and mobile viewports.
+3. The server fetches the page HTML for desktop and mobile-style requests.
+4. The app checks metadata, image alt coverage, image reachability, and response health.
 5. The report is rendered in the dashboard, saved locally in history, and can be exported as a PDF.
 
 ## Known Limitations
@@ -201,11 +107,10 @@ Key folders:
 - Designed for public URLs only
 - No authentication or team accounts yet
 - No database persistence yet; audit history is stored only in browser `localStorage`
-- Screenshot files are stored locally in `public/audit-screenshots`
-- Full hosted browser auditing requires a separate backend runtime outside Netlify
-- Accessibility checks currently use the primary audited page response
+- Console capture, screenshots, and automated accessibility scans are not part of the hosted-safe MVP yet
+- Responsive checks currently validate reachability rather than full rendered layout behavior
 - PDF export captures the visible report area from the browser, so output can vary slightly by screen and browser rendering
-- Long or highly dynamic pages may take longer to audit or export
+- Some image-heavy pages may take longer because the API verifies a limited set of image assets per run
 - No background job queue yet; audits run within the request lifecycle
 
 ## Future Roadmap
@@ -218,6 +123,8 @@ Key folders:
 - recurring scheduled audits
 - more SEO checks
 - richer accessibility summaries and grouping
+- browser-powered console capture and screenshots
+- automated accessibility scanning
 - performance and Core Web Vitals checks
 - downloadable branded PDF reports
 - CSV and JSON export
@@ -229,6 +136,5 @@ If you install dependencies on a fresh machine, the usual local setup flow is:
 
 ```bash
 npm install
-npx playwright install chromium
 npm run dev
 ```

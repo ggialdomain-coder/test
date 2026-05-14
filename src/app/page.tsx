@@ -179,10 +179,9 @@ export default function Home() {
                   Frontend QA Checker
                 </h1>
                 <p className="max-w-xl text-base leading-7 text-slate-600 sm:text-lg sm:leading-8">
-                  Run a quick frontend quality audit on any public website and
-                  preview the kind of issues your SaaS report will surface:
-                  metadata gaps, broken assets, console problems, viewport
-                  health, and accessibility concerns.
+                  Run a hosted-safe frontend quality audit on any public
+                  website and generate a clean QA report with metadata checks,
+                  image findings, and desktop plus mobile reachability results.
                 </p>
               </div>
 
@@ -194,9 +193,9 @@ export default function Home() {
               />
 
               <div className="grid gap-4 md:grid-cols-3">
-                <StatCard label="Checks in MVP" value="9" />
-                <StatCard label="Report readiness" value="Live API" />
-                <StatCard label="Target experience" value="< 60 sec" />
+                <StatCard label="Checks in MVP" value="6" />
+                <StatCard label="Audit mode" value="Hosted-safe" />
+                <StatCard label="Target experience" value="< 20 sec" />
               </div>
 
               <ReportHistory
@@ -216,7 +215,8 @@ export default function Home() {
                   <p className="text-sm leading-6 text-slate-300">
                     Your latest audit reports are stored locally in this browser
                     only. History is capped at 10 reports to keep the MVP fast
-                    and simple.
+                    and simple, and the hosted-safe audit route avoids fragile
+                    browser automation in production.
                   </p>
                 </div>
 
@@ -297,11 +297,12 @@ export default function Home() {
                     <span className="font-medium text-slate-900">
                       Run Audit
                     </span>{" "}
-                    to generate a frontend QA report.
+                    to generate a hosted-safe frontend QA report.
                   </p>
                   <p>
-                    The UI is connected to the audit API and ready to evolve
-                    into the fuller Playwright plus `axe-core` pipeline.
+                    This MVP uses server-side HTML and asset analysis so it can
+                    run reliably on standard hosting. Browser-level checks are
+                    intentionally out of scope for this deployed version.
                   </p>
                   {isDevelopment ? (
                     <p className="break-all text-xs text-slate-500">

@@ -4,6 +4,8 @@ export type AuditStatus =
   | "Needs Improvement"
   | "Poor";
 
+export type AuditMode = "hosted-safe" | "browser";
+
 export type AuditErrorDebug = {
   code: string;
   technicalMessage?: string;
@@ -44,6 +46,7 @@ export type ViewportStatus = {
 };
 
 export type AuditResult = {
+  auditMode: AuditMode;
   url: string;
   auditedAt: string;
   pageTitle: string;

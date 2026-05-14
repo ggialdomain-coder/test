@@ -5,7 +5,7 @@ import { useState } from "react";
 type AuditSectionProps = {
   title: string;
   summary: string;
-  status: "pass" | "fail";
+  status: "pass" | "fail" | "info";
   items: string[];
   emptyMessage?: string;
   defaultOpen?: boolean;
@@ -22,12 +22,15 @@ export function AuditSection({
   const [isOpen, setIsOpen] = useState(defaultOpen);
   const hasIssues = items.length > 0;
   const isPass = status === "pass";
+  const isInfo = status === "info";
   const sectionId = `${title.toLowerCase().replace(/\s+/g, "-")}-details`;
 
   return (
     <div
       className={`rounded-3xl border p-5 shadow-sm ${
-        isPass
+        isInfo
+          ? "border-slate-200 bg-slate-50/90"
+          : isPass
           ? "border-emerald-200 bg-emerald-50/60"
           : "border-amber-200 bg-amber-50/70"
       }`}
@@ -44,12 +47,14 @@ export function AuditSection({
             <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
             <span
               className={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
-                isPass
+                isInfo
+                  ? "bg-slate-200 text-slate-700"
+                  : isPass
                   ? "bg-emerald-100 text-emerald-700"
                   : "bg-amber-100 text-amber-700"
               }`}
             >
-              {isPass ? "Pass" : "Review"}
+              {isInfo ? "Info" : isPass ? "Pass" : "Review"}
             </span>
           </div>
           <p className="text-sm leading-6 text-slate-600">{summary}</p>

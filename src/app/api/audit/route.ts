@@ -1,123 +1,49 @@
-import { mkdir } from "fs/promises";
 import { NextRequest, NextResponse } from "next/server";
-import path from "path";
 
 import { calculateAuditScore } from "@/lib/calculateAuditScore";
 import type {
-  AccessibilityIssue,
   AuditErrorDebug,
   AuditRequest,
   AuditResult,
-  ConsoleIssue,
   ImageIssue,
   ViewportStatus,
 } from "@/types/audit";
 
-const NAVIGATION_TIMEOUT_MS = 15000;
-const PAGE_LOAD_TIMEOUT_MS = 5000;
-const SCREENSHOT_DIRECTORY = path.join(
-  process.cwd(),
-  "public",
-  "audit-screenshots",
-);
+const PAGE_TIMEOUT_MS = 12000;
+const IMAGE_TIMEOUT_MS = 5000;
+const MAX_IMAGE_CHECKS = 12;
 
-type PageAuditData = {
-  pageTitle: string;
-  metaDescription: string;
-  missingAltImages: ImageIssue[];
-  brokenImages: ImageIssue[];
-  accessibilityIssues: AccessibilityIssue[];
-  screenshotUrl: string;
-};
-
-type ViewportAuditOutcome = {
-  status: ViewportStatus;
-  pageData?: PageAuditData;
-};
+const DESKTOP_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+const MOBILE_USER_AGENT =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
 type AuditErrorResponse = {
   error: string;
   debug?: AuditErrorDebug;
 };
 
-type BrowserLike = {
-  newContext: (options: {
-    viewport: { width: number; height: number };
-    userAgent?: string;
-    isMobile: boolean;
-    deviceScaleFactor: number;
-  }) => Promise<BrowserContextLike>;
-  close: () => Promise<void>;
+type FetchOutcome = {
+  status: ViewportStatus;
+  html?: string;
 };
 
-type BrowserContextLike = {
-  newPage: () => Promise<PageLike>;
-  close: () => Promise<void>;
-};
+class AuditRouteError extends Error {
+  code: string;
+  status: number;
+  hint?: string;
 
-type PageLike = {
-  on: (
-    event: "console",
-    callback: (message: ConsoleMessageLike) => void,
-  ) => void;
-  goto: (
-    url: string,
-    options: { waitUntil: "domcontentloaded"; timeout: number },
-  ) => Promise<{
-    ok: () => boolean;
-    status: () => number;
-  } | null>;
-  waitForLoadState: (
-    state: "load" | "networkidle",
-    options: { timeout: number },
-  ) => Promise<void>;
-  title: () => Promise<string>;
-  locator: (selector: string) => {
-    first: () => {
-      getAttribute: (name: string) => Promise<string | null>;
-    };
-    evaluateAll: <T>(pageFunction: (elements: Element[]) => T) => Promise<T>;
-  };
-  addScriptTag: (options: { content: string }) => Promise<unknown>;
-  evaluate: <T>(pageFunction: () => Promise<T>) => Promise<T>;
-  screenshot: (options: {
-    path?: string;
-    fullPage: boolean;
-    type: "png";
-  }) => Promise<Buffer>;
-};
-
-type ConsoleMessageLike = {
-  type: () => string;
-  text: () => string;
-  location: () => {
-    url?: string;
-    lineNumber?: number;
-  };
-};
+  constructor(code: string, message: string, status: number, hint?: string) {
+    super(message);
+    this.name = "AuditRouteError";
+    this.code = code;
+    this.status = status;
+    this.hint = hint;
+  }
+}
 
 function getInvalidUrlMessage() {
   return "Enter a valid website URL that starts with http:// or https://.";
-}
-
-function isLocalDevelopmentUrl(targetUrl: string) {
-  try {
-    const parsed = new URL(targetUrl);
-    return ["localhost", "127.0.0.1"].includes(parsed.hostname);
-  } catch {
-    return false;
-  }
-}
-
-function isSelfAuditTarget(targetUrl: string, requestUrl: string) {
-  try {
-    const target = new URL(targetUrl);
-    const current = new URL(requestUrl);
-
-    return target.host === current.host;
-  } catch {
-    return false;
-  }
 }
 
 function isValidAuditRequest(body: unknown): body is AuditRequest {
@@ -135,6 +61,7 @@ function isValidAuditRequest(body: unknown): body is AuditRequest {
 
 function createEmptyResult(url: string): AuditResult {
   return {
+    auditMode: "hosted-safe",
     url,
     auditedAt: new Date().toISOString(),
     pageTitle: "",
@@ -158,131 +85,12 @@ function createEmptyResult(url: string): AuditResult {
   };
 }
 
-function createScreenshotFilename(
-  targetUrl: string,
-  viewport: "desktop" | "mobile",
-  timestamp: string,
-) {
-  const hostname = new URL(targetUrl).hostname
-    .replace(/[^a-z0-9-]/gi, "-")
-    .toLowerCase();
-
-  return `${hostname}-${viewport}-${timestamp}.png`;
-}
-
-function shouldUseInlineScreenshots() {
-  return process.env.NETLIFY === "true";
-}
-
-function isHostedDemoEnvironment() {
-  return process.env.NETLIFY === "true";
-}
-
-function getFriendlyAuditError(error: unknown) {
-  const message = error instanceof Error ? error.message.toLowerCase() : "";
-
-  if (message.includes("timeout")) {
-    return "The website took too long to respond. Try again in a moment.";
-  }
-
-  if (
-    message.includes("err_name_not_resolved") ||
-    message.includes("err_internet_disconnected") ||
-    message.includes("err_connection_refused") ||
-    message.includes("err_connection_timed_out") ||
-    message.includes("err_address_unreachable") ||
-    message.includes("net::")
-  ) {
-    return "The website could not be reached. Check the URL and make sure the site is publicly accessible.";
-  }
-
-  if (
-    message.includes("ssl") ||
-    message.includes("certificate") ||
-    message.includes("err_cert")
-  ) {
-    return "The website could not be loaded because of an SSL or certificate issue.";
-  }
-
-  if (message.includes("browser") || message.includes("playwright")) {
-    return "The audit browser ran into a problem while checking this website. Please try again.";
-  }
-
-  return "The website could not be audited right now. Please try again.";
-}
-
-function getAuditErrorDebug(error: unknown, targetUrl?: string): AuditErrorDebug {
-  const technicalMessage =
-    error instanceof Error ? error.message : "Unknown audit failure.";
-  const message = technicalMessage.toLowerCase();
-
-  if (message.includes("timeout")) {
-    return {
-      code: "AUDIT_TIMEOUT",
-      technicalMessage,
-      targetUrl,
-      hint: "The target page did not finish loading within the audit timeout window.",
-    };
-  }
-
-  if (
-    message.includes("err_name_not_resolved") ||
-    message.includes("err_internet_disconnected") ||
-    message.includes("err_connection_refused") ||
-    message.includes("err_connection_timed_out") ||
-    message.includes("err_address_unreachable") ||
-    message.includes("net::")
-  ) {
-    return {
-      code: "UNREACHABLE_WEBSITE",
-      technicalMessage,
-      targetUrl,
-      hint: "The browser could not reach the target host from the current environment.",
-    };
-  }
-
-  if (
-    message.includes("ssl") ||
-    message.includes("certificate") ||
-    message.includes("err_cert")
-  ) {
-    return {
-      code: "SSL_OR_CERTIFICATE_ERROR",
-      technicalMessage,
-      targetUrl,
-      hint: "The target site returned an SSL or certificate problem during loading.",
-    };
-  }
-
-  if (
-    message.includes("spawn eperm") ||
-    message.includes("browsertype.launch") ||
-    message.includes("playwright")
-  ) {
-    return {
-      code: "PLAYWRIGHT_LAUNCH_FAILURE",
-      technicalMessage,
-      targetUrl,
-      hint: "The Playwright browser process could not start or was blocked by the local environment.",
-    };
-  }
-
-  return {
-    code: "AUDIT_RUNTIME_FAILURE",
-    technicalMessage,
-    targetUrl,
-    hint: "The audit request failed before a more specific error could be identified.",
-  };
-}
-
 function createErrorResponse(
   message: string,
   status: number,
   debug?: AuditErrorDebug,
 ) {
-  const body: AuditErrorResponse = {
-    error: message,
-  };
+  const body: AuditErrorResponse = { error: message };
 
   if (process.env.NODE_ENV !== "production" && debug) {
     body.debug = debug;
@@ -291,201 +99,237 @@ function createErrorResponse(
   return NextResponse.json(body, { status });
 }
 
-function addConsoleIssue(
-  issueMap: Map<string, ConsoleIssue>,
-  message: ConsoleMessageLike,
-) {
-  if (message.type() !== "error") {
-    return;
-  }
-
-  const location = message.location();
-  const locationValue =
-    location.url && typeof location.lineNumber === "number"
-      ? `${location.url}:${location.lineNumber}`
-      : location.url || undefined;
-
-  const issue: ConsoleIssue = {
-    type: message.type(),
-    message: message.text(),
-    location: locationValue,
-  };
-
-  const key = `${issue.type}:${issue.message}:${issue.location ?? ""}`;
-  issueMap.set(key, issue);
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&nbsp;/gi, " ");
 }
 
-async function collectPageAuditData(
-  targetUrl: string,
-  viewport: "desktop" | "mobile",
-  size: { width: number; height: number },
-  browser: BrowserLike,
-  consoleIssueMap: Map<string, ConsoleIssue>,
-  screenshotFilePath?: string,
-  screenshotUrl?: string,
-  axeSource?: string,
-): Promise<ViewportAuditOutcome> {
-  const context = await browser.newContext({
-    viewport: size,
-    userAgent:
-      viewport === "mobile"
-        ? "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
-        : undefined,
-    isMobile: viewport === "mobile",
-    deviceScaleFactor: viewport === "mobile" ? 3 : 1,
+function normalizeText(value: string) {
+  return decodeHtmlEntities(value.replace(/\s+/g, " ").trim());
+}
+
+function stripWrappingQuotes(value: string) {
+  return value.replace(/^['"]|['"]$/g, "").trim();
+}
+
+function getAttributeValue(tag: string, attributeName: string) {
+  const attributePattern = new RegExp(
+    `${attributeName}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    "i",
+  );
+  const match = tag.match(attributePattern);
+
+  if (!match) {
+    return null;
+  }
+
+  const rawValue = match[2] ?? match[3] ?? match[4] ?? "";
+  return normalizeText(stripWrappingQuotes(rawValue));
+}
+
+function extractTitle(html: string) {
+  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return match ? normalizeText(match[1]) : "";
+}
+
+function extractMetaDescription(html: string) {
+  const metaTags = html.match(/<meta\b[^>]*>/gi) ?? [];
+
+  for (const tag of metaTags) {
+    const name = getAttributeValue(tag, "name");
+
+    if (name?.toLowerCase() === "description") {
+      return getAttributeValue(tag, "content") ?? "";
+    }
+  }
+
+  return "";
+}
+
+function extractImages(html: string, baseUrl: string) {
+  const imageTags = html.match(/<img\b[^>]*>/gi) ?? [];
+
+  return imageTags.map((tag) => {
+    const rawSrc = getAttributeValue(tag, "src") ?? "";
+    const altValue = getAttributeValue(tag, "alt");
+    const hasAlt = /\balt\s*=/.test(tag);
+
+    let resolvedSrc = rawSrc;
+
+    if (rawSrc && !rawSrc.startsWith("data:")) {
+      try {
+        resolvedSrc = new URL(rawSrc, baseUrl).toString();
+      } catch {
+        resolvedSrc = rawSrc;
+      }
+    }
+
+    return {
+      src: resolvedSrc,
+      alt: altValue,
+      hasAlt,
+    };
   });
+}
+
+function getFriendlyAuditError(error: unknown) {
+  if (error instanceof AuditRouteError) {
+    return error.message;
+  }
+
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+
+  if (message.includes("timeout") || message.includes("aborted")) {
+    return "The website took too long to respond. Try again in a moment.";
+  }
+
+  if (
+    message.includes("fetch failed") ||
+    message.includes("enotfound") ||
+    message.includes("econnrefused") ||
+    message.includes("ehostunreach") ||
+    message.includes("unreachable")
+  ) {
+    return "The website could not be reached. Check the URL and make sure the site is publicly accessible.";
+  }
+
+  if (
+    message.includes("ssl") ||
+    message.includes("certificate") ||
+    message.includes("tls")
+  ) {
+    return "The website could not be loaded because of an SSL or certificate issue.";
+  }
+
+  return "The website could not be audited right now. Please try again.";
+}
+
+function getAuditErrorDebug(
+  error: unknown,
+  targetUrl?: string,
+): AuditErrorDebug {
+  if (error instanceof AuditRouteError) {
+    return {
+      code: error.code,
+      targetUrl,
+      hint: error.hint,
+      technicalMessage: error.message,
+    };
+  }
+
+  const technicalMessage =
+    error instanceof Error ? error.message : "Unknown audit failure.";
+  const message = technicalMessage.toLowerCase();
+
+  if (message.includes("timeout") || message.includes("aborted")) {
+    return {
+      code: "AUDIT_TIMEOUT",
+      technicalMessage,
+      targetUrl,
+      hint: "The target page did not respond before the hosted-safe audit timeout expired.",
+    };
+  }
+
+  if (
+    message.includes("fetch failed") ||
+    message.includes("enotfound") ||
+    message.includes("econnrefused") ||
+    message.includes("ehostunreach")
+  ) {
+    return {
+      code: "UNREACHABLE_WEBSITE",
+      technicalMessage,
+      targetUrl,
+      hint: "The server-side audit request could not reach the target website.",
+    };
+  }
+
+  return {
+    code: "AUDIT_RUNTIME_FAILURE",
+    technicalMessage,
+    targetUrl,
+    hint: "The hosted-safe audit failed before a more specific error could be identified.",
+  };
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const page = await context.newPage();
+    return await fetch(url, {
+      ...options,
+      redirect: "follow",
+      signal: controller.signal,
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.name === "AbortError" || error.message.toLowerCase().includes("aborted"))
+    ) {
+      throw new AuditRouteError(
+        "AUDIT_TIMEOUT",
+        "The website took too long to respond. Try again in a moment.",
+        504,
+        "The target page did not respond before the hosted-safe audit timeout expired.",
+      );
+    }
 
-    page.on("console", (message: ConsoleMessageLike) =>
-      addConsoleIssue(consoleIssueMap, message),
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchViewportHtml(
+  url: string,
+  viewport: "desktop" | "mobile",
+): Promise<FetchOutcome> {
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          "user-agent": viewport === "mobile" ? MOBILE_USER_AGENT : DESKTOP_USER_AGENT,
+          accept: "text/html,application/xhtml+xml",
+        },
+      },
+      PAGE_TIMEOUT_MS,
     );
 
-    const response = await page.goto(targetUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: NAVIGATION_TIMEOUT_MS,
-    });
-
-    await page
-      .waitForLoadState("load", {
-        timeout: PAGE_LOAD_TIMEOUT_MS,
-      })
-      .catch(() => {
-        return undefined;
-      });
-
-    if (!isLocalDevelopmentUrl(targetUrl)) {
-      await page
-        .waitForLoadState("networkidle", {
-          timeout: PAGE_LOAD_TIMEOUT_MS,
-        })
-        .catch(() => {
-          return undefined;
-        });
-    }
-
-    if (!response) {
+    if (!response.ok) {
       return {
         status: {
           viewport,
           loaded: false,
+          statusCode: response.status,
           errorMessage:
-            "The website did not return a response for this viewport check.",
-        },
-      };
-    }
-
-    if (!response.ok()) {
-      return {
-        status: {
-          viewport,
-          loaded: false,
-          statusCode: response.status(),
-          errorMessage:
-            response.status() >= 500
+            response.status >= 500
               ? "The website returned a server error during loading."
-              : "The website could not be loaded successfully in this viewport.",
+              : "The website could not be loaded successfully for this check.",
         },
       };
     }
 
-    const pageTitle = await page.title();
-    const metaDescription = await page
-      .locator('meta[name="description"]')
-      .first()
-      .getAttribute("content");
-
-    const missingAltImages = await page
-      .locator("img")
-      .evaluateAll((images: Element[]) => {
-      return (images as HTMLImageElement[])
-        .filter((image) => !image.hasAttribute("alt"))
-        .map((image) => ({
-          src: image.getAttribute("src") || "",
-          reason: "missing-alt" as const,
-          alt: image.getAttribute("alt"),
-        }));
-      });
-
-    const brokenImages = await page
-      .locator("img")
-      .evaluateAll((images: Element[]) => {
-      return (images as HTMLImageElement[])
-        .filter((image) => image.complete && image.naturalWidth === 0)
-        .map((image) => ({
-          src: image.getAttribute("src") || "",
-          reason: "broken" as const,
-          alt: image.getAttribute("alt"),
-        }));
-      });
-
-    let accessibilityIssues: AccessibilityIssue[] = [];
-
-    if (axeSource) {
-      await page.addScriptTag({
-        content: axeSource,
-      });
-
-      accessibilityIssues = await page.evaluate(async () => {
-      type AxeRunResult = {
-        violations: Array<{
-          id: string;
-          impact?: string | null;
-          description: string;
-          help: string;
-          nodes: Array<{
-            target: string[];
-          }>;
-        }>;
-      };
-
-      const axeGlobal = (
-        window as unknown as Window & {
-          axe: {
-            run: () => Promise<AxeRunResult>;
-          };
-        }
-      ).axe;
-
-      const results = await axeGlobal.run();
-
-      return results.violations.map((violation) => ({
-        id: violation.id,
-        impact: violation.impact ?? null,
-        description: violation.description,
-        help: violation.help,
-        selectors: violation.nodes.flatMap((node) => node.target),
-        nodes: violation.nodes.length,
-      }));
-      });
-    }
-
-    const screenshotBuffer = await page.screenshot({
-      path: screenshotFilePath,
-      fullPage: true,
-      type: "png",
-    });
-
-    const resolvedScreenshotUrl =
-      shouldUseInlineScreenshots() || !screenshotUrl
-        ? `data:image/png;base64,${screenshotBuffer.toString("base64")}`
-        : screenshotUrl;
+    const html = await response.text();
 
     return {
       status: {
         viewport,
         loaded: true,
-        statusCode: response.status(),
+        statusCode: response.status,
       },
-      pageData: {
-        pageTitle,
-        metaDescription: metaDescription ?? "",
-        missingAltImages,
-        brokenImages,
-        accessibilityIssues,
-        screenshotUrl: resolvedScreenshotUrl,
-      },
+      html,
     };
   } catch (error) {
     return {
@@ -495,134 +339,142 @@ async function collectPageAuditData(
         errorMessage: getFriendlyAuditError(error),
       },
     };
-  } finally {
-    await context.close();
   }
 }
 
-export async function POST(request: NextRequest) {
-  let browser: BrowserLike | null = null;
+function isSkippableImageSource(src: string) {
+  return (
+    !src ||
+    src.startsWith("data:") ||
+    src.startsWith("blob:") ||
+    src.startsWith("javascript:")
+  );
+}
 
+async function isBrokenImage(url: string) {
+  if (isSkippableImageSource(url)) {
+    return false;
+  }
+
+  try {
+    const headResponse = await fetchWithTimeout(
+      url,
+      { method: "HEAD" },
+      IMAGE_TIMEOUT_MS,
+    );
+
+    const contentType = headResponse.headers.get("content-type") ?? "";
+
+    if (!headResponse.ok) {
+      return true;
+    }
+
+    if (contentType && !contentType.toLowerCase().startsWith("image/")) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    try {
+      const getResponse = await fetchWithTimeout(
+        url,
+        {
+          method: "GET",
+          headers: {
+            range: "bytes=0-0",
+          },
+        },
+        IMAGE_TIMEOUT_MS,
+      );
+
+      const contentType = getResponse.headers.get("content-type") ?? "";
+      return !getResponse.ok || !contentType.toLowerCase().startsWith("image/");
+    } catch {
+      return true;
+    }
+  }
+}
+
+async function collectBrokenImages(images: ImageIssue[]) {
+  const uniqueCandidates = Array.from(
+    new Map(images.map((image) => [image.src, image])).values(),
+  )
+    .filter((image) => !isSkippableImageSource(image.src))
+    .slice(0, MAX_IMAGE_CHECKS);
+
+  const checks = await Promise.all(
+    uniqueCandidates.map(async (image) => ({
+      image,
+      broken: await isBrokenImage(image.src),
+    })),
+  );
+
+  return checks
+    .filter((entry) => entry.broken)
+    .map((entry) => ({
+      ...entry.image,
+      reason: "broken" as const,
+    }));
+}
+
+export async function POST(request: NextRequest) {
   try {
     const body: unknown = await request.json();
 
     if (!isValidAuditRequest(body)) {
-      return createErrorResponse(
-        getInvalidUrlMessage(),
-        400,
-        {
-          code: "INVALID_URL",
-          hint: "Use a full URL including http:// or https://.",
-        },
-      );
+      return createErrorResponse(getInvalidUrlMessage(), 400, {
+        code: "INVALID_URL",
+        hint: "Use a full URL including http:// or https://.",
+      });
     }
 
     const url = body.url.trim();
-
-    if (isHostedDemoEnvironment()) {
-      return createErrorResponse(
-        "This hosted demo is available online, but live website auditing is disabled in the serverless environment. Use local development for real audits.",
-        501,
-        {
-          code: "HOSTED_DEMO_AUDIT_DISABLED",
-          targetUrl: url,
-          hint: "The Netlify deployment is running in demo mode because Playwright-based browser auditing is not enabled there.",
-        },
-      );
-    }
-
-    if (isSelfAuditTarget(url, request.url)) {
-      return createErrorResponse(
-        "This local development URL is serving the dashboard itself. For local testing, audit a different app URL or use a public website.",
-        400,
-        {
-          code: "SELF_AUDIT_BLOCKED",
-          targetUrl: url,
-          hint: "Run the audit against another local app port or a public website.",
-        },
-      );
-    }
-
-    const consoleIssueMap = new Map<string, ConsoleIssue>();
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-
-    const desktopFilename = createScreenshotFilename(url, "desktop", timestamp);
-    const mobileFilename = createScreenshotFilename(url, "mobile", timestamp);
-    const desktopScreenshotUrl = `/audit-screenshots/${desktopFilename}`;
-    const mobileScreenshotUrl = `/audit-screenshots/${mobileFilename}`;
-    const persistScreenshotsToPublic = !shouldUseInlineScreenshots();
-    const desktopScreenshotPath = persistScreenshotsToPublic
-      ? path.join(SCREENSHOT_DIRECTORY, desktopFilename)
-      : undefined;
-    const mobileScreenshotPath = persistScreenshotsToPublic
-      ? path.join(SCREENSHOT_DIRECTORY, mobileFilename)
-      : undefined;
-
-    if (persistScreenshotsToPublic) {
-      await mkdir(SCREENSHOT_DIRECTORY, { recursive: true });
-    }
-
-    const [{ chromium }, axeModule] = await Promise.all([
-      import("playwright"),
-      import("axe-core"),
+    const [desktopFetch, mobileFetch] = await Promise.all([
+      fetchViewportHtml(url, "desktop"),
+      fetchViewportHtml(url, "mobile"),
     ]);
 
-    browser = await chromium.launch({
-      headless: true,
-    });
-
-    const axeSource = axeModule.default.source;
-
-    const desktopAudit = await collectPageAuditData(
-      url,
-      "desktop",
-      { width: 1440, height: 900 },
-      browser,
-      consoleIssueMap,
-      desktopScreenshotPath,
-      desktopScreenshotUrl,
-      axeSource,
-    );
-
-    const mobileAudit = await collectPageAuditData(
-      url,
-      "mobile",
-      { width: 390, height: 844 },
-      browser,
-      consoleIssueMap,
-      mobileScreenshotPath,
-      mobileScreenshotUrl,
-      axeSource,
-    );
-
-    if (!desktopAudit.status.loaded && !mobileAudit.status.loaded) {
-      return createErrorResponse(
-        desktopAudit.status.errorMessage ||
-          mobileAudit.status.errorMessage ||
-          "The website could not be loaded in either viewport.",
+    if (!desktopFetch.status.loaded && !mobileFetch.status.loaded) {
+      throw new AuditRouteError(
+        "BOTH_VIEWPORTS_FAILED",
+        desktopFetch.status.errorMessage ||
+          mobileFetch.status.errorMessage ||
+          "The website could not be loaded in either check.",
         502,
-        {
-          code: "BOTH_VIEWPORTS_FAILED",
-          targetUrl: url,
-          hint: "Both desktop and mobile checks failed before the page could be audited.",
-        },
+        "Both hosted-safe reachability checks failed before the page HTML could be analyzed.",
       );
     }
 
-    const primaryData = desktopAudit.pageData ?? mobileAudit.pageData;
+    const primaryHtml = desktopFetch.html ?? mobileFetch.html ?? "";
+    const pageTitle = extractTitle(primaryHtml);
+    const metaDescription = extractMetaDescription(primaryHtml);
+    const images = extractImages(primaryHtml, url);
+
+    const missingAltImages: ImageIssue[] = images
+      .filter((image) => !image.hasAlt)
+      .map((image) => ({
+        src: image.src,
+        alt: image.alt,
+        reason: "missing-alt",
+      }));
+
+    const brokenImages = await collectBrokenImages(
+      images.map((image) => ({
+        src: image.src,
+        alt: image.alt,
+        reason: "broken",
+      })),
+    );
+
     const resultWithoutScore = {
       ...createEmptyResult(url),
       auditedAt: new Date().toISOString(),
-      pageTitle: primaryData?.pageTitle ?? "",
-      metaDescription: primaryData?.metaDescription ?? "",
-      missingAltImages: primaryData?.missingAltImages ?? [],
-      brokenImages: primaryData?.brokenImages ?? [],
-      consoleErrors: Array.from(consoleIssueMap.values()),
-      accessibilityIssues: primaryData?.accessibilityIssues ?? [],
-      desktopStatus: desktopAudit.status,
-      mobileStatus: mobileAudit.status,
-      desktopScreenshotUrl: desktopAudit.pageData?.screenshotUrl ?? "",
-      mobileScreenshotUrl: mobileAudit.pageData?.screenshotUrl ?? "",
+      pageTitle,
+      metaDescription,
+      missingAltImages,
+      brokenImages,
+      desktopStatus: desktopFetch.status,
+      mobileStatus: mobileFetch.status,
     };
 
     const result: AuditResult = {
@@ -632,14 +484,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
+    const status = error instanceof AuditRouteError ? error.status : 500;
+
     return createErrorResponse(
       getFriendlyAuditError(error),
-      500,
+      status,
       getAuditErrorDebug(error),
     );
-  } finally {
-    if (browser) {
-      await browser.close();
-    }
   }
 }

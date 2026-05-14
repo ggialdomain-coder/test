@@ -19,6 +19,7 @@ type AuditResultProps = {
 export function AuditResult({ result }: AuditResultProps) {
   const reportRef = useRef<HTMLDivElement | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const isHostedSafe = result.auditMode === "hosted-safe";
 
   const totalIssueCount =
     result.missingAltImages.length +
@@ -63,14 +64,18 @@ export function AuditResult({ result }: AuditResultProps) {
   const responsiveIssues = [
     ...(!result.desktopStatus.loaded
       ? [
-          `Desktop check failed: ${
+          `Desktop ${
+            isHostedSafe ? "reachability" : "check"
+          } failed: ${
             result.desktopStatus.errorMessage || "Unable to load desktop viewport."
           }`,
         ]
       : []),
     ...(!result.mobileStatus.loaded
       ? [
-          `Mobile check failed: ${
+          `Mobile ${
+            isHostedSafe ? "reachability" : "check"
+          } failed: ${
             result.mobileStatus.errorMessage || "Unable to load mobile viewport."
           }`,
         ]
@@ -142,6 +147,10 @@ export function AuditResult({ result }: AuditResultProps) {
       >
         <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetaCard
+              label="Audit Mode"
+              value={isHostedSafe ? "Hosted-safe HTML analysis" : "Browser audit"}
+            />
             <MetaCard label="Audit URL" value={result.url} />
             <MetaCard
               label="Audit Date"
@@ -151,6 +160,15 @@ export function AuditResult({ result }: AuditResultProps) {
             <MetaCard label="Summary" value={`${totalIssueCount} issue(s) found`} />
           </div>
         </div>
+
+        {isHostedSafe ? (
+          <div className="rounded-[28px] border border-sky-200 bg-sky-50 px-5 py-4 text-sm leading-6 text-sky-900 shadow-sm">
+            This hosted-safe report uses direct HTML and asset checks so it can
+            run reliably on standard hosting. Browser-rendered checks like
+            console capture, screenshots, and automated accessibility scans are
+            shown as not included in this MVP mode.
+          </div>
+        ) : null}
 
         <div className="grid gap-4 xl:grid-cols-[280px_1fr]">
           <AuditScoreCard score={result.score} status={result.status} />
@@ -169,14 +187,14 @@ export function AuditResult({ result }: AuditResultProps) {
               {
                 label: "Desktop Status",
                 value: result.desktopStatus.loaded
-                  ? `Passed (${result.desktopStatus.statusCode ?? "OK"})`
+                  ? `${isHostedSafe ? "Reachable" : "Passed"} (${result.desktopStatus.statusCode ?? "OK"})`
                   : "Failed",
                 tone: result.desktopStatus.loaded ? "positive" : "negative",
               },
               {
                 label: "Mobile Status",
                 value: result.mobileStatus.loaded
-                  ? `Passed (${result.mobileStatus.statusCode ?? "OK"})`
+                  ? `${isHostedSafe ? "Reachable" : "Passed"} (${result.mobileStatus.statusCode ?? "OK"})`
                   : "Failed",
                 tone: result.mobileStatus.loaded ? "positive" : "negative",
               },
@@ -192,15 +210,23 @@ export function AuditResult({ result }: AuditResultProps) {
               },
               {
                 label: "Console Errors",
-                value: String(result.consoleErrors.length),
-                tone:
-                  result.consoleErrors.length === 0 ? "positive" : "negative",
+                value: isHostedSafe
+                  ? "Not included"
+                  : String(result.consoleErrors.length),
+                tone: isHostedSafe
+                  ? "neutral"
+                  : result.consoleErrors.length === 0
+                    ? "positive"
+                    : "negative",
               },
               {
                 label: "Accessibility Issues",
-                value: String(result.accessibilityIssues.length),
-                tone:
-                  result.accessibilityIssues.length === 0
+                value: isHostedSafe
+                  ? "Not included"
+                  : String(result.accessibilityIssues.length),
+                tone: isHostedSafe
+                  ? "neutral"
+                  : result.accessibilityIssues.length === 0
                     ? "positive"
                     : "negative",
               },
@@ -234,37 +260,63 @@ export function AuditResult({ result }: AuditResultProps) {
           <AuditSection
             title="Console Errors"
             summary={
-              consoleIssues.length === 0
+              isHostedSafe
+                ? "Console capture is not part of the hosted-safe MVP mode."
+                : consoleIssues.length === 0
                 ? "No console errors were captured during page load."
                 : `${consoleIssues.length} console error(s) were captured.`
             }
-            status={consoleIssues.length === 0 ? "pass" : "fail"}
+            status={
+              isHostedSafe ? "info" : consoleIssues.length === 0 ? "pass" : "fail"
+            }
             items={consoleIssues}
-            emptyMessage="No issues found."
+            emptyMessage={
+              isHostedSafe
+                ? "Console capture is available in a future browser-powered audit mode."
+                : "No issues found."
+            }
             defaultOpen={consoleIssues.length > 0}
           />
           <AuditSection
             title="Accessibility"
             summary={
-              accessibilityIssues.length === 0
+              isHostedSafe
+                ? "Automated accessibility scanning is not part of the hosted-safe MVP mode."
+                : accessibilityIssues.length === 0
                 ? "No accessibility issues were returned in this audit response."
                 : `${accessibilityIssues.length} accessibility issue(s) need review.`
             }
-            status={accessibilityIssues.length === 0 ? "pass" : "fail"}
+            status={
+              isHostedSafe
+                ? "info"
+                : accessibilityIssues.length === 0
+                  ? "pass"
+                  : "fail"
+            }
             items={accessibilityIssues}
-            emptyMessage="No issues found."
+            emptyMessage={
+              isHostedSafe
+                ? "Automated accessibility checks are available in a future browser-powered audit mode."
+                : "No issues found."
+            }
             defaultOpen={accessibilityIssues.length > 0}
           />
           <AuditSection
             title="Responsive Checks"
             summary={
               responsiveIssues.length === 0
-                ? "Desktop and mobile viewport checks both passed."
+                ? isHostedSafe
+                  ? "Desktop and mobile reachability checks both passed."
+                  : "Desktop and mobile viewport checks both passed."
                 : `${responsiveIssues.length} responsive check(s) need review.`
             }
             status={responsiveIssues.length === 0 ? "pass" : "fail"}
             items={responsiveIssues}
-            emptyMessage="No issues found."
+            emptyMessage={
+              isHostedSafe
+                ? "No issues found. Both desktop and mobile HTTP reachability checks passed."
+                : "No issues found."
+            }
           />
         </div>
 
@@ -273,11 +325,21 @@ export function AuditResult({ result }: AuditResultProps) {
             title="Desktop Screenshot"
             imageUrl={result.desktopScreenshotUrl}
             altText={`Desktop audit screenshot for ${result.url}`}
+            emptyMessage={
+              isHostedSafe
+                ? "Screenshots are not included in hosted-safe mode."
+                : "Screenshot not available for this viewport."
+            }
           />
           <ScreenshotCard
             title="Mobile Screenshot"
             imageUrl={result.mobileScreenshotUrl}
             altText={`Mobile audit screenshot for ${result.url}`}
+            emptyMessage={
+              isHostedSafe
+                ? "Screenshots are not included in hosted-safe mode."
+                : "Screenshot not available for this viewport."
+            }
           />
         </div>
 
@@ -305,10 +367,12 @@ function ScreenshotCard({
   title,
   imageUrl,
   altText,
+  emptyMessage,
 }: {
   title: string;
   imageUrl: string;
   altText: string;
+  emptyMessage: string;
 }) {
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
@@ -328,7 +392,7 @@ function ScreenshotCard({
           />
         ) : (
           <div className="flex min-h-56 items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-6 text-center text-sm leading-6 text-slate-500">
-            Screenshot not available for this viewport.
+            {emptyMessage}
           </div>
         )}
       </div>
